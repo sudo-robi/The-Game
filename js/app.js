@@ -174,8 +174,12 @@ document.getElementById("create-room-btn").addEventListener("click", async () =>
 document.getElementById("join-submit-btn").addEventListener("click", async () => {
   const code = joinCodeInput.value.trim();
   if (!code || code.length !== 4) { joinError.textContent = "Enter a valid 4-character room code"; return; }
-  joinError.textContent = ""; const room = await Storage.get(roomKey(code));
-  if (!room) { joinError.textContent = "Room not found."; return; }
+  joinError.textContent = "Searching for room\u2026"; let room = await Storage.get(roomKey(code));
+  if (!room) {
+    await new Promise(r => setTimeout(r, 3000));
+    room = await Storage.get(roomKey(code));
+  }
+  if (!room) { joinError.textContent = "Room not found. Make sure the code is correct and the room has been created."; return; }
   if (room.players.length >= 3) { joinError.textContent = "This room is full."; return; }
   if (!room.players.find(p => p.address?.toLowerCase() === getIdentity().toLowerCase())) { room.players.push({ username: currentUser, address: getIdentity(), score: 0, connected: true }); await Storage.set(roomKey(code), room); }
   currentRoomCode = code; sessionStorage.setItem("roomCode", code); Heartbeat.start(currentRoomCode, getIdentity()); enterWaitingRoom();

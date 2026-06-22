@@ -1,22 +1,23 @@
 // ================================================================
-// 0G Storage adapter — tries real 0G Storage Turbo API first,
-// falls back to localStorage for local/single-browser testing.
+// 0G Storage adapter — uploads room state to 0G Storage,
+// uses 0G DA for cross-device room discovery (roomCode → rootHash),
+// falls back to localStorage when 0G is unreachable.
 // ================================================================
 
 const STORAGE_MODE_KEY = "0g_storage_mode";
-const STORAGE_INDEX_KEY = "0g_storage_index";
 const STORAGE_DATA_PREFIX = "0g_data_";
 
 const ZeroGStorage = {
   _useLocalFallback: true,
   _uploadCount: 0,
   _lastRootHash: null,
+  _roomRootCache: {},
   nodeUrl: "https://indexer-storage-testnet-turbo.0g.ai",
 
   async init() {
     const mode = sessionStorage.getItem(STORAGE_MODE_KEY);
     if (mode === "local") {
-      console.log("[Storage] Using localStorage fallback");
+      this._useLocalFallback = true;
       return;
     }
     try {
@@ -26,10 +27,10 @@ const ZeroGStorage = {
       const data = await res.json();
       if (data.nodes?.length) {
         this.nodeUrl = data.nodes[0].url || this.nodeUrl;
-        console.log("[Storage] 0G Storage node:", this.nodeUrl);
+        this._useLocalFallback = false;
       }
     } catch {
-      console.warn("[Storage] 0G Storage unreachable, switching to localStorage");
+      console.warn("[Storage] 0G Storage unreachable, using localStorage");
       this._useLocalFallback = true;
       sessionStorage.setItem(STORAGE_MODE_KEY, "local");
     }
@@ -67,19 +68,19 @@ const ZeroGStorage = {
 
   async set(key, value) {
     this._showIndicator("loading");
+
+    // Always save to localStorage as a fast local cache
+    try {
+      localStorage.setItem(STORAGE_DATA_PREFIX + key, JSON.stringify(value));
+    } catch {}
+
     if (this._useLocalFallback) {
-      try {
-        localStorage.setItem(STORAGE_DATA_PREFIX + key, JSON.stringify(value));
-        this._uploadCount++;
-        this._showIndicator("success");
-        this._updateArchInfo();
-        return true;
-      } catch (e) {
-        console.error("[Storage] localStorage set error:", e);
-        this._showIndicator("error");
-        return null;
-      }
+      this._uploadCount++;
+      this._showIndicator("success");
+      this._updateArchInfo();
+      return true;
     }
+
     // Try 0G Storage upload
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
@@ -93,11 +94,20 @@ const ZeroGStorage = {
         });
         if (!res.ok) throw new Error("HTTP " + res.status);
         const data = await res.json();
-        this._lastRootHash = data.rootHash || data.root;
+        const rootHash = data.rootHash || data.root;
+        this._lastRootHash = rootHash;
         this._uploadCount++;
         this._showIndicator("success");
         this._updateArchInfo();
         this._updateRootDisplay();
+
+        // Cache root hash for this room key (e.g. "room:ABCD" → "0x...")
+        const roomCode = key.startsWith("room:") ? key.slice(5) : null;
+        if (roomCode) {
+          this._roomRootCache[roomCode] = rootHash;
+          // Fire-and-forget DA registration for cross-device discovery
+          ZeroGDA.registerRoom(roomCode, rootHash);
+        }
         return data;
       } catch (e) {
         console.error("[Storage] 0G upload error:", e);
@@ -105,10 +115,13 @@ const ZeroGStorage = {
           this._showIndicator("error");
           await new Promise(r => setTimeout(r, 1500));
         } else {
-          console.warn("[Storage] 0G upload failed, falling back to localStorage");
+          console.warn("[Storage] 0G upload failed twice, falling back to localStorage");
           this._useLocalFallback = true;
           sessionStorage.setItem(STORAGE_MODE_KEY, "local");
-          return this.set(key, value);
+          this._uploadCount++;
+          this._showIndicator("success");
+          this._updateArchInfo();
+          return true;
         }
       }
     }
@@ -116,24 +129,44 @@ const ZeroGStorage = {
   },
 
   async get(key) {
-    if (this._useLocalFallback) {
-      try {
-        const raw = localStorage.getItem(STORAGE_DATA_PREFIX + key);
-        return raw ? JSON.parse(raw) : null;
-      } catch {
-        return null;
+    // Try localStorage first (fast local cache)
+    try {
+      const local = localStorage.getItem(STORAGE_DATA_PREFIX + key);
+      if (local) return JSON.parse(local);
+    } catch {}
+
+    // If 0G Storage was used, try downloading by root hash
+    const roomCode = key.startsWith("room:") ? key.slice(5) : null;
+    if (!this._useLocalFallback && roomCode) {
+      let rootHash = this._roomRootCache[roomCode];
+
+      // Try DA discovery if we don't have the root hash cached
+      if (!rootHash) {
+        rootHash = await ZeroGDA.discoverRoom(roomCode);
+        if (rootHash) this._roomRootCache[roomCode] = rootHash;
+      }
+
+      if (rootHash) {
+        try {
+          const res = await fetch(this.nodeUrl + "/download?root=" + rootHash, {
+            signal: AbortSignal.timeout(10000)
+          });
+          if (res.ok) {
+            const text = await res.text();
+            let parsed;
+            try { parsed = JSON.parse(text); } catch { parsed = JSON.parse(atob(text)); }
+            if (parsed) {
+              // Cache in localStorage for future fast reads
+              localStorage.setItem(STORAGE_DATA_PREFIX + key, JSON.stringify(parsed));
+              return parsed;
+            }
+          }
+        } catch (e) {
+          console.warn("[Storage] 0G download failed:", e);
+        }
       }
     }
-    // Try 0G Storage download — but we need the root hash from a prior upload
-    // Since we don't have persistent rootHash storage across browsers,
-    // fall back to localStorage for cross-user room sharing
-    try {
-      const raw = localStorage.getItem(STORAGE_DATA_PREFIX + key);
-      if (raw) {
-        console.warn("[Storage] 0G download unavailable (needs rootHash), using localStorage fallback");
-        return JSON.parse(raw);
-      }
-    } catch {}
+
     return null;
   },
 

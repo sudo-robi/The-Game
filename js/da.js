@@ -99,6 +99,62 @@ const ZeroGDA = {
       const json = await res.json();
       return json.result?.status === "finalized";
     } catch { return false; }
+  },
+
+  _roomNamespace(roomCode) {
+    const raw = "pizza-room-" + roomCode;
+    return ethers.utils.hexlify(ethers.utils.toUtf8Bytes(raw)).padEnd(66, "0").slice(0, 66);
+  },
+
+  async registerRoom(roomCode, rootHash) {
+    try {
+      const blob = { roomCode, rootHash, timestamp: Date.now() };
+      const encoded = ZeroGDA._encodeBlob(blob);
+      const hexBlob = ZeroGDA._toHex(encoded);
+      const res = await fetch(ZeroGDA.rpcUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + ZeroGDA.apiKey },
+        body: JSON.stringify({
+          jsonrpc: "2.0", method: "das_submitBlob",
+          params: [{ namespace: ZeroGDA._roomNamespace(roomCode), data: hexBlob, gasLimit: "0x100000" }],
+          id: Date.now()
+        })
+      });
+      if (!res.ok) throw new Error("DA register HTTP error: " + res.status);
+      const json = await res.json();
+      if (json.error) throw new Error("DA register RPC error: " + json.error.message);
+      return json.result?.commitment || json.result;
+    } catch (e) {
+      console.warn("[DA] registerRoom failed:", e);
+      return null;
+    }
+  },
+
+  async discoverRoom(roomCode) {
+    try {
+      const res = await fetch(ZeroGDA.rpcUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + ZeroGDA.apiKey },
+        body: JSON.stringify({
+          jsonrpc: "2.0", method: "das_getBlobsByNamespace",
+          params: [{ namespace: ZeroGDA._roomNamespace(roomCode), limit: 1, offset: 0 }],
+          id: Date.now()
+        })
+      });
+      if (!res.ok) throw new Error("DA discover HTTP error: " + res.status);
+      const json = await res.json();
+      if (json.error) throw new Error("DA discover RPC error: " + json.error.message);
+      const blobs = json.result?.blobs || [];
+      if (!blobs.length) return null;
+      const latest = blobs[blobs.length - 1];
+      const bytes = new Uint8Array(latest.data.match(/.{1,2}/g).map(b => parseInt(b, 16)));
+      const text = new TextDecoder().decode(bytes).replace(/\0/g, "");
+      const parsed = JSON.parse(text);
+      return parsed.rootHash || null;
+    } catch (e) {
+      console.warn("[DA] discoverRoom failed:", e);
+      return null;
+    }
   }
 };
 
