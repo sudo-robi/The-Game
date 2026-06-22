@@ -1,39 +1,20 @@
 // ================================================================
-// 0G Storage adapter — uploads room state to 0G Storage,
-// uses 0G DA for cross-device room discovery (roomCode → rootHash),
-// falls back to localStorage when 0G is unreachable.
+// Storage adapter
+//   Layer 1: localStorage — instant local cache
+//   Layer 2: 0G DA — cross-device sync (full room state)
+//   Layer 3: 0G Storage — best-effort persistent backup
 // ================================================================
 
-const STORAGE_MODE_KEY = "0g_storage_mode";
 const STORAGE_DATA_PREFIX = "0g_data_";
 
 const ZeroGStorage = {
-  _useLocalFallback: true,
   _uploadCount: 0,
   _lastRootHash: null,
   _roomRootCache: {},
   nodeUrl: "https://indexer-storage-testnet-turbo.0g.ai",
 
   async init() {
-    const mode = sessionStorage.getItem(STORAGE_MODE_KEY);
-    if (mode === "local") {
-      this._useLocalFallback = true;
-      return;
-    }
-    try {
-      const res = await fetch(this.nodeUrl + "/nodes", {
-        signal: AbortSignal.timeout(2000)
-      });
-      const data = await res.json();
-      if (data.nodes?.length) {
-        this.nodeUrl = data.nodes[0].url || this.nodeUrl;
-        this._useLocalFallback = false;
-      }
-    } catch {
-      console.warn("[Storage] 0G Storage unreachable, using localStorage");
-      this._useLocalFallback = true;
-      sessionStorage.setItem(STORAGE_MODE_KEY, "local");
-    }
+    // Nothing to probe — DA and Storage are used best-effort
   },
 
   _showIndicator(status) {
@@ -49,8 +30,7 @@ const ZeroGStorage = {
   _updateArchInfo() {
     const info = document.getElementById("arch-storage-info");
     if (!info) return;
-    const mode = this._useLocalFallback ? "local" : (this.nodeUrl ? this.nodeUrl.replace("https://", "").slice(0, 16) + "\u2026" : "N/A");
-    info.textContent = "U:" + this._uploadCount + " | " + mode;
+    info.textContent = "U:" + this._uploadCount + " | " + (this.nodeUrl ? this.nodeUrl.replace("https://", "").slice(0, 16) + "\u2026" : "N/A");
   },
 
   _updateRootDisplay() {
@@ -69,19 +49,25 @@ const ZeroGStorage = {
   async set(key, value) {
     this._showIndicator("loading");
 
-    // Always save to localStorage as a fast local cache
+    // Layer 1 — localStorage (instant local write)
     try {
       localStorage.setItem(STORAGE_DATA_PREFIX + key, JSON.stringify(value));
     } catch {}
 
-    if (this._useLocalFallback) {
-      this._uploadCount++;
-      this._showIndicator("success");
-      this._updateArchInfo();
-      return true;
-    }
+    // Layer 2 — DA cross-device sync (fire-and-forget)
+    ZeroGDA.submitRoomState(key, value);
 
-    // Try 0G Storage upload
+    // Layer 3 — 0G Storage upload (best-effort, fire-and-forget)
+    this._tryStorageUpload(key, value);
+
+    this._uploadCount++;
+    this._showIndicator("success");
+    this._updateArchInfo();
+    return true;
+  },
+
+  // Best-effort Storage upload in background
+  async _tryStorageUpload(key, value) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         const blob = new Blob([JSON.stringify(value)], { type: "application/json" });
@@ -96,56 +82,44 @@ const ZeroGStorage = {
         const data = await res.json();
         const rootHash = data.rootHash || data.root;
         this._lastRootHash = rootHash;
-        this._uploadCount++;
-        this._showIndicator("success");
-        this._updateArchInfo();
         this._updateRootDisplay();
-
-        // Cache root hash for this room key (e.g. "room:ABCD" → "0x...")
         const roomCode = key.startsWith("room:") ? key.slice(5) : null;
         if (roomCode) {
           this._roomRootCache[roomCode] = rootHash;
-          // Fire-and-forget DA registration for cross-device discovery
-          ZeroGDA.registerRoom(roomCode, rootHash);
         }
-        return data;
+        return;
       } catch (e) {
-        console.error("[Storage] 0G upload error:", e);
+        console.warn("[Storage] _tryStorageUpload attempt", attempt, e);
         if (attempt === 0) {
-          this._showIndicator("error");
           await new Promise(r => setTimeout(r, 1500));
-        } else {
-          console.warn("[Storage] 0G upload failed twice, falling back to localStorage");
-          this._useLocalFallback = true;
-          sessionStorage.setItem(STORAGE_MODE_KEY, "local");
-          this._uploadCount++;
-          this._showIndicator("success");
-          this._updateArchInfo();
-          return true;
         }
       }
     }
-    return null;
   },
 
   async get(key) {
-    // Try localStorage first (fast local cache)
+    // Layer 1 — localStorage (fast local cache)
     try {
       const local = localStorage.getItem(STORAGE_DATA_PREFIX + key);
       if (local) return JSON.parse(local);
     } catch {}
 
-    // If 0G Storage was used, try downloading by root hash
-    const roomCode = key.startsWith("room:") ? key.slice(5) : null;
-    if (!this._useLocalFallback && roomCode) {
-      let rootHash = this._roomRootCache[roomCode];
+    // Layer 2 — DA cross-device fetch
+    const daState = await ZeroGDA.fetchRoomState(key);
+    if (daState) {
+      // Cache in localStorage for future fast reads
+      try { localStorage.setItem(STORAGE_DATA_PREFIX + key, JSON.stringify(daState)); } catch {}
+      return daState;
+    }
 
-      // Try DA discovery if we don't have the root hash cached
+    // Layer 3 — 0G Storage download (via root hash from DA or cache)
+    const roomCode = key.startsWith("room:") ? key.slice(5) : null;
+    if (roomCode) {
+      let rootHash = this._roomRootCache[roomCode];
       if (!rootHash) {
         rootHash = await ZeroGDA.discoverRoom(roomCode);
         if (rootHash) this._roomRootCache[roomCode] = rootHash;
       }
-
       if (rootHash) {
         try {
           const res = await fetch(this.nodeUrl + "/download?root=" + rootHash, {
@@ -156,8 +130,7 @@ const ZeroGStorage = {
             let parsed;
             try { parsed = JSON.parse(text); } catch { parsed = JSON.parse(atob(text)); }
             if (parsed) {
-              // Cache in localStorage for future fast reads
-              localStorage.setItem(STORAGE_DATA_PREFIX + key, JSON.stringify(parsed));
+              try { localStorage.setItem(STORAGE_DATA_PREFIX + key, JSON.stringify(parsed)); } catch {}
               return parsed;
             }
           }

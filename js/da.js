@@ -101,9 +101,69 @@ const ZeroGDA = {
     } catch { return false; }
   },
 
+  // Per-storage-key namespace for full-room-state DA sync
+  _keyNamespace(key) {
+    const raw = "pizza-s-" + key.replace(/[^a-zA-Z0-9_]/g, "_");
+    return ethers.utils.hexlify(ethers.utils.toUtf8Bytes(raw)).padEnd(66, "0").slice(0, 66);
+  },
+
   _roomNamespace(roomCode) {
     const raw = "pizza-room-" + roomCode;
     return ethers.utils.hexlify(ethers.utils.toUtf8Bytes(raw)).padEnd(66, "0").slice(0, 66);
+  },
+
+  // ================================================================
+  // Full room-state sync via DA (cross-device multiplayer)
+  // ================================================================
+  async submitRoomState(key, data) {
+    try {
+      const ns = ZeroGDA._keyNamespace(key);
+      const encoded = ZeroGDA._encodeBlob(data);
+      const hexBlob = ZeroGDA._toHex(encoded);
+      const res = await fetch(ZeroGDA.rpcUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + ZeroGDA.apiKey },
+        body: JSON.stringify({
+          jsonrpc: "2.0", method: "das_submitBlob",
+          params: [{ namespace: ns, data: hexBlob, gasLimit: "0x100000" }],
+          id: Date.now()
+        })
+      });
+      if (!res.ok) throw new Error("DA submitRoomState HTTP: " + res.status);
+      const json = await res.json();
+      if (json.error) throw new Error("DA submitRoomState RPC: " + json.error.message);
+      return json.result?.commitment || json.result;
+    } catch (e) {
+      console.warn("[DA] submitRoomState failed:", e);
+      return null;
+    }
+  },
+
+  async fetchRoomState(key) {
+    try {
+      const ns = ZeroGDA._keyNamespace(key);
+      const res = await fetch(ZeroGDA.rpcUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + ZeroGDA.apiKey },
+        body: JSON.stringify({
+          jsonrpc: "2.0", method: "das_getBlobsByNamespace",
+          params: [{ namespace: ns, limit: 1, offset: 0 }],
+          id: Date.now()
+        })
+      });
+      if (!res.ok) throw new Error("DA fetchRoomState HTTP: " + res.status);
+      const json = await res.json();
+      if (json.error) throw new Error("DA fetchRoomState RPC: " + json.error.message);
+      const blobs = json.result?.blobs || [];
+      if (!blobs.length) return null;
+      const latest = blobs[blobs.length - 1];
+      const bytes = new Uint8Array(latest.data.match(/.{1,2}/g).map(b => parseInt(b, 16)));
+      const text = new TextDecoder().decode(bytes).replace(/\0/g, "");
+      return JSON.parse(text);
+    } catch (e) {
+      console.warn("[DA] fetchRoomState failed:", e);
+      return null;
+    }
   },
 
   async registerRoom(roomCode, rootHash) {
