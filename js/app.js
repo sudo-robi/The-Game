@@ -620,6 +620,12 @@ joinCodeInput.addEventListener("keydown", (e) => { if (e.key === "Enter") docume
 // Silent reconnect on page load
 // ================================================================
 (async function silentReconnect() {
+  await ZeroGStorage.loadIndex();
+  const loadingEl = document.getElementById("storage-loading");
+  if (loadingEl) {
+    loadingEl.style.opacity = "0";
+    setTimeout(() => { loadingEl.style.display = "none"; }, 500);
+  }
   const savedUsername = sessionStorage.getItem("username");
   if (savedUsername) {
     currentUser = savedUsername;
