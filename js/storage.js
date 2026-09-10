@@ -16,7 +16,6 @@ const ZeroGStorage = {
   async init() {
     const mode = sessionStorage.getItem(STORAGE_MODE_KEY);
     if (mode === "local") {
-      console.log("[Storage] Using localStorage fallback");
       return;
     }
     try {
@@ -26,10 +25,8 @@ const ZeroGStorage = {
       const data = await res.json();
       if (data.nodes?.length) {
         this.nodeUrl = data.nodes[0].url || this.nodeUrl;
-        console.log("[Storage] 0G Storage node:", this.nodeUrl);
       }
     } catch {
-      console.warn("[Storage] 0G Storage unreachable, switching to localStorage");
       this._useLocalFallback = true;
       sessionStorage.setItem(STORAGE_MODE_KEY, "local");
     }
@@ -105,7 +102,6 @@ const ZeroGStorage = {
           this._showIndicator("error");
           await new Promise(r => setTimeout(r, 1500));
         } else {
-          console.warn("[Storage] 0G upload failed, falling back to localStorage");
           this._useLocalFallback = true;
           sessionStorage.setItem(STORAGE_MODE_KEY, "local");
           return this.set(key, value);
@@ -130,7 +126,6 @@ const ZeroGStorage = {
     try {
       const raw = localStorage.getItem(STORAGE_DATA_PREFIX + key);
       if (raw) {
-        console.warn("[Storage] 0G download unavailable (needs rootHash), using localStorage fallback");
         return JSON.parse(raw);
       }
     } catch {}

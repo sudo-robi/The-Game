@@ -45,7 +45,6 @@ const ZeroGCompute = {
       ZeroGCompute.lastNodeId = res.headers.get("X-0G-Node-ID") || data.node_id || "newton-compute-01";
       const content = data.choices?.[0]?.message?.content?.trim();
       if (!content) throw new Error("Empty response from 0G Compute");
-      console.log("[0G Compute] Node: " + ZeroGCompute.lastNodeId + " | Response: " + content);
       ZeroGCompute._showIndicator(false);
       Arch.markCompute();
       return content;
@@ -79,7 +78,6 @@ async function getZeroBotPick(room) {
     return result.toLowerCase().includes("apple") ? "apple" : "pizza";
   } catch {
     ZeroGCompute._showIndicator(false);
-    console.warn("[0G Compute] ZeroBot fallback to random pick");
     return Math.random() > 0.5 ? "pizza" : "apple";
   }
 }

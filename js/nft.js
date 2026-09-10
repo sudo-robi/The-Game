@@ -27,7 +27,6 @@ const NFTMinter = {
       NFTMinter.readContract = new ethers.Contract(
         NFT_CONTRACT_ADDRESS, NFT_ABI, provider
       );
-      console.log("[NFT] Minter initialized at", NFT_CONTRACT_ADDRESS);
     } catch (e) {
       console.error("[NFT] Init failed:", e);
     }
@@ -119,7 +118,6 @@ const NFTMinter = {
       const tokenId = event?.args?.tokenId?.toNumber() || null;
 
       NFTMinter._showMintStatus("Certificate minted!", "success");
-      console.log("[NFT] Minted tokenId:", tokenId, "| tx:", receipt.transactionHash);
 
       Arch.markNFT();
 

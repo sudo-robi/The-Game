@@ -16,12 +16,11 @@ const ScoreRegistry = {
     if (ScoreRegistry._initialized) return;
     try {
       const provider = Wallet.provider || (window.ethereum ? new ethers.providers.Web3Provider(window.ethereum) : null);
-      if (!provider) { console.warn("[ScoreRegistry] No provider available"); return; }
+      if (!provider) { return; }
       ScoreRegistry._signer = provider.getSigner();
       ScoreRegistry._contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, ScoreRegistry._signer);
       ScoreRegistry._initialized = true;
-      console.log("[ScoreRegistry] Initialized at", CONTRACT_ADDRESS);
-    } catch (e) { console.warn("[ScoreRegistry] Init failed:", e); }
+    } catch (e) { }
   },
   async recordGame(roomCode, winnerAddress, scores, commitmentHash) {
     ScoreRegistry.init();
@@ -31,7 +30,7 @@ const ScoreRegistry = {
       const tx = await ScoreRegistry._contract.recordGame(roomCode, winnerAddress, scores, commitmentHash);
       const receipt = await tx.wait();
       return receipt.transactionHash;
-    } catch (e) { console.warn("[ScoreRegistry] recordGame failed:", e); return null; }
+    } catch (e) {  return null; }
   },
   async recordRoundWin(playerAddress) {
     ScoreRegistry.init();
@@ -39,7 +38,7 @@ const ScoreRegistry = {
     try {
       const tx = await ScoreRegistry._contract.recordRoundWin(playerAddress);
       await tx.wait();
-    } catch (e) { console.warn("[ScoreRegistry] recordRoundWin failed:", e); }
+    } catch (e) { }
   },
   async recordParticipation(playerAddress, score) {
     ScoreRegistry.init();
@@ -47,7 +46,7 @@ const ScoreRegistry = {
     try {
       const tx = await ScoreRegistry._contract.recordParticipation(playerAddress, score);
       await tx.wait();
-    } catch (e) { console.warn("[ScoreRegistry] recordParticipation failed:", e); }
+    } catch (e) { }
   },
   async getMyStats() {
     ScoreRegistry.init();
@@ -55,7 +54,7 @@ const ScoreRegistry = {
     try {
       const stats = await ScoreRegistry._contract.getPlayerStats(Wallet.address);
       return { wins: stats.wins.toNumber(), games: stats.games.toNumber(), totalRoundsWon: stats.totalRoundsWon.toNumber(), totalScore: stats.totalScore.toNumber() };
-    } catch (e) { console.warn("[ScoreRegistry] getMyStats failed:", e); return null; }
+    } catch (e) {  return null; }
   },
   async getTopPlayers(limit) {
     ScoreRegistry.init();
@@ -63,7 +62,7 @@ const ScoreRegistry = {
     try {
       const list = await ScoreRegistry._contract.getTopPlayers(limit || 50);
       return list.map(p => ({ address: p.player, wins: p.wins.toNumber(), games: p.games.toNumber(), totalScore: p.totalScore.toNumber() }));
-    } catch (e) { console.warn("[ScoreRegistry] getTopPlayers failed:", e); return []; }
+    } catch (e) {  return []; }
   },
   async getTotalGames() {
     ScoreRegistry.init();

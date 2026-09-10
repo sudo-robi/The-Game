@@ -50,7 +50,6 @@ const ZeroGDA = {
       const commitment = json.result?.commitment || json.result;
       ZeroGDA.submissionCount++;
       ZeroGDA.commitments.push({ commitment, timestamp: Date.now(), data });
-      console.log("[0G DA] Submitted blob | Commitment: " + commitment);
       return commitment;
     } catch (e) {
       console.error("[0G DA] Submit error:", e);
@@ -125,7 +124,7 @@ async function submitGameResultToDA(room) {
     const message = JSON.stringify({ winner: resultData.winner.address, roomCode: resultData.roomCode, timestamp: resultData.timestamp });
     signature = await Wallet.sign(message);
     resultData.signature = signature;
-  } catch { console.warn("[0G DA] Could not sign result \u2014 submitting unsigned"); }
+  } catch { }
   ZeroGDA._showDAIndicator(true, "Submitting to DA\u2026");
   const commitment = await ZeroGDA.submit(resultData);
   ZeroGDA._showDAIndicator(false);

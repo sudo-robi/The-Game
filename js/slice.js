@@ -48,7 +48,6 @@ const SliceRewards = {
       );
 
       await SliceRewards.refreshBalance();
-      console.log("[SLICE] Initialized | Balance:", SliceRewards.currentBalance);
     } catch (e) {
       console.error("[SLICE] Init failed:", e);
     }
@@ -74,7 +73,6 @@ const SliceRewards = {
       SliceRewards.sessionEarned += 10;
       await SliceRewards.refreshBalance();
       SliceRewards._showRewardToast("+10 $SLICE claimed!", "success");
-      console.log("[SLICE] Game win reward claimed");
     } catch (e) {
       if (e.reason?.includes("already rewarded")) {
         SliceRewards._showRewardToast("Reward already claimed for this room", "info");
@@ -92,7 +90,6 @@ const SliceRewards = {
       SliceRewards.sessionEarned += 1;
       await SliceRewards.refreshBalance();
       SliceRewards._showRewardToast("+1 $SLICE for round win!", "success");
-      console.log("[SLICE] Round " + round + " win reward claimed");
     } catch (e) {
       if (!e.reason?.includes("already rewarded")) {
         console.error("[SLICE] claimRoundWin failed:", e);
